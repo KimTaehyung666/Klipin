@@ -140,7 +140,10 @@
   .hist-chip .ht{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .hist-chip .hs{font-size:10px;color:var(--dim);margin-top:2px;font-family:var(--mono)}
   .empty{color:var(--dim);font-size:11.5px;border:1px dashed var(--line);border-radius:4px;padding:16px;text-align:center;line-height:1.6}
-  footer{border-top:1px solid var(--line);margin-top:34px;padding:16px 0 4px;display:flex;justify-content:space-between;gap:10px;color:var(--dim);font:9px var(--mono);letter-spacing:.05em}
+  footer{border-top:1px solid var(--line);margin-top:34px;padding:16px 0 4px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px 14px;color:var(--dim);font:9px var(--mono);letter-spacing:.05em}
+  footer .credit{color:var(--muted)}
+  footer .credit b{color:var(--coral);font-weight:400}
+  @media (max-width:640px){footer{justify-content:center;text-align:center}}
 </style>
 </head>
 <body>
@@ -290,6 +293,7 @@
 
   <footer>
     <span>KLIPIN STUDIO</span>
+    <span class="credit">DIBUAT DENGAN <b>♥</b> OLEH NATE RIVER</span>
     <span>ANALISIS: GROQ · TRANSCRIPT: API · RENDER: LOKAL</span>
   </footer>
 </div>
