@@ -560,16 +560,26 @@ Aturan:
 Balas HANYA dengan JSON object persis seperti ini, tanpa teks lain:
 {{"hooks": [{{"text": "...", "angle": "rasa penasaran"}}]}}"""
 
-    try:
-        raw = call_groq(prompt, max_tokens=1800)
-        hooks = parse_hooks(raw)
-        if not hooks:
-            return jsonify({"error": "Format response tidak valid, coba lagi!"}), 500
-        return jsonify({"hooks": hooks})
-    except requests.Timeout:
-        return jsonify({"error": "Timeout, coba lagi!"}), 504
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    # Model reasoning bisa kehabisan token sebelum JSON selesai (Groq balas
+    # "Failed to validate JSON") — token dibuat lega + retry sekali.
+    hooks = None
+    last_err = None
+    for attempt in range(2):
+        try:
+            raw = call_groq(prompt, max_tokens=3000)
+            hooks = parse_hooks(raw)
+            if hooks:
+                break
+            last_err = Exception("Format response tidak valid, coba lagi!")
+        except requests.Timeout:
+            return jsonify({"error": "Timeout, coba lagi!"}), 504
+        except Exception as e:
+            last_err = e
+            if "validate JSON" not in str(e):
+                break
+    if not hooks:
+        return jsonify({"error": str(last_err) if last_err else "Gagal generate hook, coba lagi!"}), 500
+    return jsonify({"hooks": hooks})
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5003)), debug=os.environ.get("DEBUG") == "1")
