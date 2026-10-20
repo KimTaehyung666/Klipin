@@ -245,6 +245,7 @@
         <label><input type="checkbox" id="cut-vertical"> Vertikal 9:16 (background blur)</label>
         <label><input type="checkbox" id="cut-captions" checked> Caption dari transcript</label>
       </div>
+      <p class="note" style="margin:-2px 0 14px">Caption muncul hanya kalau sudah ada transcript aktif — dari analisis link di panel 01, atau transcript Whisper file ini. Tanpa transcript, video dipotong polos.</p>
       <details class="manual" id="whisper-box">
         <summary>File ini tidak punya transcript? Buat dari audionya (Whisper AI)</summary>
         <div class="hint">Audio diekstrak dari file di browser, lalu dikirim per potongan ±8 menit ke Groq Whisper untuk ditulis jadi transcript bertimestamp. Hasilnya otomatis terpasang sebagai sumber caption di studio ini, tersalin ke kolom transcript manual di panel 01, dan bisa langsung dianalisis jadi momen.</div>
@@ -621,6 +622,10 @@ async function doCut() {
     let finalName = 'raw.mp4';
 
     const segs = CUT_BIND && CUT_BIND.segments ? CUT_BIND.segments : [];
+    let capNote = '';
+    if (useCap && !segs.length) {
+      capNote = 'Caption TIDAK ditambahkan: belum ada transcript yang aktif. Jalankan analisis dari link (panel 01) atau buat transcript Whisper dari file ini dulu, lalu potong lagi.';
+    }
     if (useCap && segs.length) {
       const srt = buildSrt(segs, start, end);
       if (srt.trim()) {
@@ -628,8 +633,10 @@ async function doCut() {
         await ff.writeFile('cap.srt', new TextEncoder().encode(srt));
         const code2 = await ff.exec(['-i', 'raw.mp4', '-vf', 'subtitles=cap.srt',
           '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '26', '-c:a', 'copy', 'out.mp4']);
-        if (code2 === 0) { finalName = 'out.mp4'; }
-        else { setStatus('Caption gagal ditempel (keterbatasan mesin browser), video tetap jadi tanpa caption.', false); }
+        if (code2 === 0) { finalName = 'out.mp4'; capNote = 'Caption sudah menempel di video.'; }
+        else { capNote = 'Caption gagal ditempel (keterbatasan mesin browser), video jadi tanpa caption.'; }
+      } else {
+        capNote = 'Tidak ada ucapan pada rentang waktu ini, jadi tidak ada caption yang ditempel.';
       }
     }
 
@@ -644,7 +651,7 @@ async function doCut() {
     dl.setAttribute('download', 'klipin-' + fmtClock(start) + '-' + fmtClock(end) + '.mp4');
     document.getElementById('dl-row').style.display = 'block';
     setBar(100);
-    setStatus('Selesai. Ukuran hasil: ' + (blob.size / 1048576).toFixed(1) + ' MB. Silakan download.', false);
+    setStatus('Selesai. Ukuran hasil: ' + (blob.size / 1048576).toFixed(1) + ' MB. Silakan download.' + (capNote ? ' ' + capNote : ''), false);
   } catch (e) {
     setStatus('Gagal: ' + esc(e.message || 'Gagal memotong.'), true);
   }
