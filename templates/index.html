@@ -154,6 +154,7 @@
     <span class="pill">STUDIO</span>
     <div class="top-right">
       <span class="status-chip hide-m"><span class="status-dot" id="dot-ai"></span>GROQ AI</span>
+      <span class="status-chip hide-m"><span class="status-dot off" id="dot-wh"></span>WHISPER</span>
       <span class="status-chip" id="chip-transcript"><span class="status-dot off" id="dot-tr"></span>TRANSCRIPT</span>
     </div>
   </div>
@@ -244,6 +245,15 @@
         <label><input type="checkbox" id="cut-vertical"> Vertikal 9:16 (background blur)</label>
         <label><input type="checkbox" id="cut-captions" checked> Caption dari transcript</label>
       </div>
+      <details class="manual" id="whisper-box">
+        <summary>File ini tidak punya transcript? Buat dari audionya (Whisper AI)</summary>
+        <div class="hint">Audio diekstrak dari file di browser, lalu dikirim per potongan ±8 menit ke Groq Whisper untuk ditulis jadi transcript bertimestamp. Hasilnya otomatis terpasang sebagai sumber caption di studio ini, tersalin ke kolom transcript manual di panel 01, dan bisa langsung dianalisis jadi momen.</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">
+          <button class="btn-ghost" id="tr-btn" onclick="transcribeFile()">Buat transcript dari file</button>
+          <button class="btn-ghost" id="tr-analyze-btn" onclick="analyzeFromFile()" style="display:none;color:var(--blue-bright);border-color:rgba(110,124,255,.45)">Analisis momen dari transcript ini</button>
+        </div>
+        <div class="cut-status" id="tr-status"></div>
+      </details>
       <button class="btn-primary btn-blue" id="cut-btn" onclick="doCut()">Potong Sekarang</button>
       <div class="bar" id="cut-bar"><i></i></div>
       <div class="cut-status" id="cut-status"></div>
@@ -304,6 +314,8 @@
 let CURRENT = null;
 let CUT_BIND = null;
 let SRC_FILE = null;
+let SRC_DURATION = 0;
+let FILE_SEGS = null;
 
 function esc(s) {
   return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -323,7 +335,7 @@ function fmtClock(sec) {
                : m + ':' + String(s).padStart(2,'0');
 }
 function srcLabel(s) {
-  const map = {youtube:'otomatis', manual:'manual', transcriptapi:'TranscriptAPI', supadata:'Supadata'};
+  const map = {youtube:'otomatis', manual:'manual', transcriptapi:'TranscriptAPI', supadata:'Supadata', whisper:'Whisper (file)'};
   return map[s] || s || '';
 }
 function copyText(btn, text) {
@@ -342,6 +354,9 @@ async function loadCaps() {
     if (caps.transcript_api) {
       document.getElementById('dot-tr').classList.remove('off');
       document.getElementById('chip-transcript').lastChild.textContent = 'TRANSCRIPT API';
+    }
+    if (caps.whisper) {
+      document.getElementById('dot-wh').classList.remove('off');
     }
   } catch (e) { /* abaikan */ }
 }
@@ -390,10 +405,13 @@ function renderResults(data) {
   h += '<div class="meta">SUMBER: <span class="src">' + esc(srcLabel(data.transcript_source)) + '</span><br>' +
        (data.total_segments || 0) + ' SEGMEN · ID ' + esc(data.video_id) + '</div></div>';
   h += '<div class="clips-grid">';
+  const isYt = /^[A-Za-z0-9_-]{11}$/.test(String(data.video_id || ''));
   clips.forEach(function(c, i) {
     const d = toSec(c.end) - toSec(c.start);
     h += '<article class="clip">';
-    h += '<div class="clip-preview"><img src="https://img.youtube.com/vi/' + esc(data.video_id) + '/mqdefault.jpg" alt="">';
+    h += '<div class="clip-preview">' + (isYt
+      ? '<img src="https://img.youtube.com/vi/' + esc(data.video_id) + '/mqdefault.jpg" alt="">'
+      : '<div style="height:100%;display:flex;align-items:center;justify-content:center;color:var(--dim);font:10px var(--mono);letter-spacing:.1em">FILE LOKAL</div>');
     if (d > 0) h += '<span class="clip-duration">' + Math.round(d) + ' DTK</span>';
     h += '<span class="clip-score' + (c.score >= 8 ? ' hi' : '') + '">SKOR ' + c.score + '/10</span></div>';
     h += '<div class="clip-body">';
@@ -405,7 +423,7 @@ function renderResults(data) {
     h += '<button class="act cut" onclick="sendToStudio(' + i + ')">Potong clip ini</button>';
     h += '<button class="act" onclick="copyIdx(this,' + i + ',\'hook\')">Salin hook</button>';
     if (c.hashtags) h += '<button class="act" onclick="copyIdx(this,' + i + ',\'hashtags\')">Salin hashtag</button>';
-    h += '<a class="act" target="_blank" href="https://www.youtube.com/watch?v=' + esc(data.video_id) + '&t=' + Math.floor(toSec(c.start)) + '">Buka di YT</a>';
+    if (isYt) h += '<a class="act" target="_blank" href="https://www.youtube.com/watch?v=' + esc(data.video_id) + '&t=' + Math.floor(toSec(c.start)) + '">Buka di YT</a>';
     h += '</div></div></article>';
   });
   h += '</div>';
@@ -489,8 +507,20 @@ fileInput.addEventListener('change', function() {
 });
 function setFile(f) {
   SRC_FILE = f;
+  SRC_DURATION = 0;
+  FILE_SEGS = null;
+  document.getElementById('tr-analyze-btn').style.display = 'none';
   document.getElementById('drop-title').textContent = f.name;
   setStatus('File siap: ' + f.name + ' (' + (f.size / 1048576).toFixed(1) + ' MB). Atur timestamp, lalu Potong Sekarang.', false);
+  try {
+    const probe = document.createElement('video');
+    probe.preload = 'metadata';
+    probe.onloadedmetadata = function() {
+      if (isFinite(probe.duration)) SRC_DURATION = probe.duration;
+      URL.revokeObjectURL(probe.src);
+    };
+    probe.src = URL.createObjectURL(f);
+  } catch (e) { /* abaikan */ }
 }
 function setStatus(msg, isErr) {
   const st = document.getElementById('cut-status');
@@ -546,6 +576,18 @@ function buildSrt(segs, start, end) {
   return cues.join('\n\n');
 }
 
+let FF_INPUT_KEY = '';
+async function ensureInput(ff) {
+  const ext = (SRC_FILE.name.split('.').pop() || 'mp4').toLowerCase().replace(/[^a-z0-9]/g, '') || 'mp4';
+  const inName = 'input.' + ext;
+  const key = SRC_FILE.name + ':' + SRC_FILE.size + ':' + ext;
+  if (FF_INPUT_KEY !== key) {
+    await ff.writeFile(inName, await FFmpegUtil.fetchFile(SRC_FILE));
+    FF_INPUT_KEY = key;
+  }
+  return inName;
+}
+
 async function doCut() {
   const btn = document.getElementById('cut-btn');
   if (!SRC_FILE) { setStatus('Pilih file videonya terlebih dahulu.', true); return; }
@@ -564,9 +606,7 @@ async function doCut() {
   try {
     const ff = await loadFFmpeg();
     setStatus('Sedang memotong… jangan tutup tab ini. Di HP, clip pendek bisa memakan 1–5 menit.', false);
-    const ext = (SRC_FILE.name.split('.').pop() || 'mp4').toLowerCase().replace(/[^a-z0-9]/g, '') || 'mp4';
-    const inName = 'input.' + ext;
-    await ff.writeFile(inName, await FFmpegUtil.fetchFile(SRC_FILE));
+    const inName = await ensureInput(ff);
 
     let vf;
     if (vertical) {
@@ -610,6 +650,100 @@ async function doCut() {
   }
   btn.disabled = false;
   btn.innerHTML = 'Potong Sekarang';
+}
+
+/* ===== TRANSCRIPT DARI FILE (Whisper) ===== */
+function setTrStatus(msg, isErr) {
+  const st = document.getElementById('tr-status');
+  st.className = 'cut-status show' + (isErr ? ' err' : '');
+  st.innerHTML = msg;
+}
+
+async function transcribeFile() {
+  const btn = document.getElementById('tr-btn');
+  if (!SRC_FILE) { setTrStatus('Pilih file videonya dulu di studio ini.', true); return; }
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner light"></span> Memproses…';
+  setBar(0);
+  try {
+    const ff = await loadFFmpeg();
+    const inName = await ensureInput(ff);
+    setTrStatus('Mengekstrak audio dari video…', false);
+    let code = await ff.exec(['-i', inName, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'aac', '-b:a', '32k', 'audio.m4a']);
+    if (code !== 0) throw new Error('Gagal mengekstrak audio (kode ' + code + '). Pastikan file punya suara.');
+    const audioData = await ff.readFile('audio.m4a');
+    if (!audioData || !audioData.length) throw new Error('Audio kosong, tidak ada suara yang bisa ditranskrip.');
+    let dur = SRC_DURATION;
+    if (!dur) dur = audioData.length / 4000; // 32kbps = 4000 byte/detik
+    const CHUNK = 480; // 8 menit per potongan (~1,9MB, aman batas upload Vercel)
+    const total = Math.max(1, Math.ceil(dur / CHUNK));
+    const all = [];
+    for (let k = 0; k < total; k++) {
+      const start = k * CHUNK;
+      setTrStatus('Menulis transcript: potongan ' + (k + 1) + ' dari ' + total + ' (' + fmtClock(start) + ')…', false);
+      if (total > 1) {
+        const ck = await ff.exec(['-ss', String(start), '-t', String(CHUNK), '-i', 'audio.m4a',
+          '-ac', '1', '-ar', '16000', '-c:a', 'aac', '-b:a', '32k', 'chunk.m4a']);
+        if (ck !== 0) throw new Error('Gagal memotong audio di potongan ' + (k + 1) + '.');
+      }
+      const chunkData = total > 1 ? await ff.readFile('chunk.m4a') : audioData;
+      const fd = new FormData();
+      fd.append('file', new Blob([chunkData], {type: 'audio/mp4'}), 'chunk.m4a');
+      fd.append('offset', String(start));
+      fd.append('lang', 'id');
+      const res = await fetch('/api/transcribe', {method: 'POST', body: fd});
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      (data.segments || []).forEach(function(s) { all.push(s); });
+      setBar(((k + 1) / total) * 100);
+    }
+    if (!all.length) throw new Error('Whisper tidak menemukan ucapan di file ini.');
+    all.sort(function(a, b) { return a.start - b.start; });
+    FILE_SEGS = all.map(function(s) { return {start: s.start, text: s.text}; });
+    CUT_BIND = {segments: FILE_SEGS};
+    const lines = all.map(function(s) { return fmtClock(s.start) + ' ' + s.text; }).join('\n');
+    document.getElementById('manual-transcript').value = lines;
+    document.getElementById('tr-analyze-btn').style.display = '';
+    setTrStatus('Transcript jadi: ' + all.length + ' segmen (' + fmtClock(dur) + '). Sudah terpasang sebagai caption Studio Potong dan tersalin ke kolom transcript manual di panel 01.', false);
+  } catch (e) {
+    setTrStatus('Gagal membuat transcript: ' + esc(e.message || 'Coba lagi.'), true);
+  }
+  btn.disabled = false;
+  btn.innerHTML = 'Buat transcript dari file';
+}
+
+async function analyzeFromFile() {
+  const box = document.getElementById('results');
+  if (!FILE_SEGS || FILE_SEGS.length < 5) {
+    box.innerHTML = '<div class="error-box">Buat transcript dari file dulu (tombol di Studio Potong), baru analisis.</div>';
+    return;
+  }
+  const btn = document.getElementById('tr-analyze-btn');
+  btn.disabled = true;
+  box.innerHTML = '<div class="loading"><div class="spinner light" style="width:22px;height:22px"></div><div>Menganalisis transcript file…</div></div>';
+  box.scrollIntoView({behavior: 'smooth'});
+  try {
+    const res = await fetch('/analyze', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        segments: FILE_SEGS,
+        videoId: 'file',
+        platform: document.getElementById('platform').value,
+        contentType: document.getElementById('content-type').value,
+        targetDuration: document.getElementById('target-duration').value,
+        maxClips: document.getElementById('max-clips').value
+      })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    CURRENT = data;
+    CUT_BIND = {segments: FILE_SEGS};
+    renderResults(data);
+  } catch (e) {
+    box.innerHTML = '<div class="error-box">Gagal analisis: ' + esc(e.message || 'Coba lagi.') + '</div>';
+  }
+  btn.disabled = false;
 }
 
 /* ===== GENERATOR HOOK ===== */

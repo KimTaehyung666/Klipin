@@ -411,8 +411,83 @@ def index():
 def capabilities():
     return jsonify({
         "transcript_api": bool(TRANSCRIPT_API_KEY or SUPADATA_API_KEY),
+        "whisper": bool(os.getenv("GROQ_API_KEY")),
         "serverless": bool(os.getenv("VERCEL")),
     })
+
+WHISPER_MODEL = os.getenv("GROQ_WHISPER_MODEL", "whisper-large-v3-turbo")
+
+@app.route("/api/transcribe", methods=["POST"])
+def transcribe():
+    """Speech-to-text satu potongan audio via Groq Whisper.
+
+    Browser mengekstrak audio dari file video (ffmpeg.wasm) dan mengirimnya
+    per potongan (audio mono 32kbps +/- 1,9MB per 8 menit, aman dari batas
+    body Vercel 4,5MB dan batas file Groq 25MB). Server menambahkan offset
+    supaya timestamp segmen kembali ke posisi aslinya di video.
+    """
+    key = os.getenv("GROQ_API_KEY")
+    if not key:
+        return jsonify({"error": "GROQ_API_KEY belum di-set di server."}), 500
+    f = request.files.get("file")
+    if f is None:
+        return jsonify({"error": "File audio tidak diterima."}), 400
+    data_bytes = f.read()
+    if not data_bytes:
+        return jsonify({"error": "File audio kosong."}), 400
+    if len(data_bytes) > 25 * 1024 * 1024:
+        return jsonify({"error": "Potongan audio terlalu besar (maks 25MB)."}), 400
+    try:
+        offset = float(request.form.get("offset", 0))
+    except (ValueError, TypeError):
+        offset = 0.0
+    lang = (request.form.get("lang") or "").strip()
+
+    payload = {
+        "model": WHISPER_MODEL,
+        "response_format": "verbose_json",
+        "timestamp_granularities[]": "segment",
+    }
+    if lang:
+        payload["language"] = lang
+    try:
+        resp = requests.post(
+            "https://api.groq.com/openai/v1/audio/transcriptions",
+            headers={"Authorization": f"Bearer {key}"},
+            files={"file": (f.filename or "chunk.m4a", data_bytes, f.mimetype or "audio/mp4")},
+            data=payload,
+            timeout=120,
+        )
+    except requests.Timeout:
+        return jsonify({"error": "Whisper timeout, coba lagi."}), 504
+    except Exception as e:
+        return jsonify({"error": f"Gagal menghubungi Whisper: {e}"}), 502
+
+    try:
+        result = resp.json()
+    except ValueError:
+        result = {}
+    if resp.status_code != 200:
+        msg = ""
+        if isinstance(result, dict):
+            msg = (result.get("error") or {}).get("message", "")
+        if resp.status_code == 401:
+            msg = "API key Groq tidak valid / sudah mati. Cek GROQ_API_KEY di server."
+        return jsonify({"error": msg or f"Whisper error (HTTP {resp.status_code})."}), 502
+
+    segments = []
+    for s in (result.get("segments") or []):
+        if not isinstance(s, dict):
+            continue
+        try:
+            start = float(s.get("start", 0)) + offset
+            end = float(s.get("end", 0)) + offset
+        except (ValueError, TypeError):
+            continue
+        text = str(s.get("text", "")).strip()
+        if text:
+            segments.append({"start": round(start, 2), "end": round(end, 2), "text": text})
+    return jsonify({"segments": segments, "duration": result.get("duration")})
 
 @app.route("/analyze", methods=["POST"])
 def analyze():
@@ -431,18 +506,38 @@ def analyze():
         target_duration = 60
     target_duration = max(15, min(180, target_duration))
 
-    if not url:
-        return jsonify({"error": "URL tidak boleh kosong!"}), 400
-    video_id = extract_video_id(url)
-    if not video_id:
-        return jsonify({"error": "URL bukan video YouTube yang valid!"}), 400
+    segments = None
+    transcript_source = None
+    video_id = None
+    direct = data.get("segments")
+    if isinstance(direct, list) and direct:
+        cleaned = []
+        for s in direct:
+            if not isinstance(s, dict):
+                continue
+            try:
+                st = float(s.get("start", 0))
+            except (ValueError, TypeError):
+                continue
+            tx = str(s.get("text", "")).strip()
+            if tx:
+                cleaned.append({"start": st, "text": tx})
+        if len(cleaned) >= 5:
+            segments = cleaned
+            transcript_source = "whisper"
+            video_id = str(data.get("videoId") or "file")
 
-    manual_text = str(data.get("transcript", ""))[:200_000]
-
-    try:
-        segments, transcript_source = get_transcript_segments(video_id, manual_text)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
+    if segments is None:
+        if not url:
+            return jsonify({"error": "URL tidak boleh kosong!"}), 400
+        video_id = extract_video_id(url)
+        if not video_id:
+            return jsonify({"error": "URL bukan video YouTube yang valid!"}), 400
+        manual_text = str(data.get("transcript", ""))[:200_000]
+        try:
+            segments, transcript_source = get_transcript_segments(video_id, manual_text)
+        except Exception as e:
+            return jsonify({"error": str(e)}), 400
 
     if len(segments) < 5:
         return jsonify({"error": "Transcript terlalu pendek untuk dianalisis!"}), 400
