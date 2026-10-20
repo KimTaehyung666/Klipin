@@ -323,7 +323,7 @@
   </section>
 
   <footer>
-    <span>KLIPIN STUDIO</span>
+    <span>KLIPIN STUDIO · MESIN CAPTION: CANVAS V2</span>
     <span class="credit">DIBUAT DENGAN <b>♥</b> OLEH NATE RIVER</span>
     <span>ANALISIS: GROQ · TRANSCRIPT: API · RENDER: LOKAL</span>
   </footer>
@@ -535,6 +535,22 @@ function setFile(f) {
   document.getElementById('tr-analyze-btn').style.display = 'none';
   document.getElementById('drop-title').textContent = f.name;
   setStatus('File siap: ' + f.name + ' (' + (f.size / 1048576).toFixed(1) + ' MB). Atur timestamp, lalu Potong Sekarang.', false);
+  // Pulihkan transcript file ini dari sesi sebelumnya (kalau pernah dibuat)
+  try {
+    const saved = localStorage.getItem('klipin_segs_' + f.name + '_' + f.size);
+    if (saved) {
+      const segs = JSON.parse(saved);
+      if (Array.isArray(segs) && segs.length) {
+        FILE_SEGS = segs;
+        CUT_BIND = {segments: segs};
+        document.getElementById('tr-analyze-btn').style.display = '';
+        document.getElementById('manual-transcript').value =
+          segs.map(function(s) { return fmtClock(s.start) + ' ' + s.text; }).join('\n');
+        setTrStatus('Transcript file ini ditemukan dari sesi sebelumnya (' + segs.length + ' segmen) — sudah terpasang sebagai caption. Tinggal potong.', false);
+        document.getElementById('whisper-box').open = true;
+      }
+    }
+  } catch (e) { /* abaikan */ }
   try {
     const probe = document.createElement('video');
     probe.preload = 'metadata';
@@ -762,8 +778,8 @@ async function doCut() {
         fc = fc.replace(/;$/, '');
         const code2 = await ff.exec(inputs.concat(['-filter_complex', fc, '-map', '[vout]', '-map', '0:a',
           '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '26', '-c:a', 'copy', 'out.mp4']));
-        if (code2 === 0) { finalName = 'out.mp4'; capNote = 'Caption sudah menempel di video (gaya: ' + styleKey + ').'; }
-        else { capNote = 'Caption gagal ditempel, video jadi tanpa caption.'; }
+        if (code2 === 0) { finalName = 'out.mp4'; capNote = 'Caption sudah menempel di video (' + cues.length + ' potong teks, gaya: ' + styleKey + ').'; }
+        else { capNote = 'Caption GAGAL ditempel (mesin browser menolak), video jadi tanpa caption.'; }
       } else {
         capNote = 'Tidak ada ucapan pada rentang waktu ini, jadi tidak ada caption yang ditempel.';
       }
@@ -837,6 +853,7 @@ async function transcribeFile() {
     all.sort(function(a, b) { return a.start - b.start; });
     FILE_SEGS = all.map(function(s) { return {start: s.start, text: s.text}; });
     CUT_BIND = {segments: FILE_SEGS};
+    try { localStorage.setItem('klipin_segs_' + SRC_FILE.name + '_' + SRC_FILE.size, JSON.stringify(FILE_SEGS)); } catch (e) { /* penuh, abaikan */ }
     const lines = all.map(function(s) { return fmtClock(s.start) + ' ' + s.text; }).join('\n');
     document.getElementById('manual-transcript').value = lines;
     document.getElementById('tr-analyze-btn').style.display = '';
