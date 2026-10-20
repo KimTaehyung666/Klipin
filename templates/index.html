@@ -336,6 +336,8 @@ let CURRENT = null;
 let CUT_BIND = null;
 let SRC_FILE = null;
 let SRC_DURATION = 0;
+let SRC_W = 0;
+let SRC_H = 0;
 let FILE_SEGS = null;
 
 function esc(s) {
@@ -538,6 +540,7 @@ function setFile(f) {
     probe.preload = 'metadata';
     probe.onloadedmetadata = function() {
       if (isFinite(probe.duration)) SRC_DURATION = probe.duration;
+      if (probe.videoWidth) { SRC_W = probe.videoWidth; SRC_H = probe.videoHeight; }
       URL.revokeObjectURL(probe.src);
     };
     probe.src = URL.createObjectURL(f);
@@ -577,80 +580,109 @@ async function loadFFmpeg() {
   return ffLoading;
 }
 
-/* ===== GAYA CAPTION (ASS) ===== */
-const CAP_STYLES = {
-  klasik:  {font: 30, bold: 0, primary: '&H00FFFFFF', outlineCol: '&H00000000', back: '&H96000000', borderStyle: 1, outline: 2, shadow: 1, align: 2, marginV: 40, upper: false},
-  kotak:   {font: 30, bold: 0, primary: '&H00FFFFFF', outlineCol: '&H00000000', back: '&H99000000', borderStyle: 3, outline: 1, shadow: 0, align: 2, marginV: 34, upper: false},
-  pop:     {font: 48, bold: 1, primary: '&H0033E0FF', outlineCol: '&H00000000', back: '&H96000000', borderStyle: 1, outline: 4, shadow: 2, align: 2, marginV: 100, upper: true},
-  tengah:  {font: 54, bold: 1, primary: '&H00FFFFFF', outlineCol: '&H00000000', back: '&H96000000', borderStyle: 1, outline: 3, shadow: 2, align: 2, marginV: 300, upper: false},
-  minimal: {font: 25, bold: 0, primary: '&H00FFFFFF', outlineCol: '&H00000000', back: '&H96000000', borderStyle: 1, outline: 0, shadow: 1, align: 2, marginV: 30, upper: false}
+/* ===== MESIN CAPTION (canvas -> PNG -> overlay ffmpeg) =====
+   Teks digambar pakai canvas browser (font web yang pasti ada), BUKAN pakai
+   filter subtitles/ass: ffmpeg.wasm tidak punya font sehingga libass diam-diam
+   tidak menggambar apa pun walau prosesnya "sukses". */
+const CAP_STYLE_CFG = {
+  klasik:  {px: 30, weight: 600, family: '"DM Sans", sans-serif', fill: '#ffffff', stroke: '#000000', strokeRatio: 0.16, box: false, upper: false, marginPct: 0.045, centerY: null, softShadow: false},
+  kotak:   {px: 30, weight: 600, family: '"DM Sans", sans-serif', fill: '#ffffff', stroke: null, strokeRatio: 0, box: true, upper: false, marginPct: 0.04, centerY: null, softShadow: false},
+  pop:     {px: 47, weight: 800, family: '"Space Grotesk", sans-serif', fill: '#ffe033', stroke: '#000000', strokeRatio: 0.20, box: false, upper: true, marginPct: 0.085, centerY: null, softShadow: false},
+  tengah:  {px: 52, weight: 800, family: '"Space Grotesk", sans-serif', fill: '#ffffff', stroke: '#000000', strokeRatio: 0.15, box: false, upper: false, marginPct: 0, centerY: 0.58, softShadow: false},
+  minimal: {px: 25, weight: 400, family: '"DM Sans", sans-serif', fill: '#ffffff', stroke: null, strokeRatio: 0, box: false, upper: false, marginPct: 0.035, centerY: null, softShadow: true}
 };
 function updateCapPreview() {
   const sel = document.getElementById('cap-style');
   const pv = document.getElementById('cap-preview');
   if (sel && pv) pv.className = 'cap-preview pv-' + sel.value;
 }
-function assTs(sec) {
-  sec = Math.max(0, sec);
-  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60),
-        s = Math.floor(sec % 60), cs = Math.floor((sec - Math.floor(sec)) * 100);
-  function p(n) { return String(n).padStart(2, '0'); }
-  return h + ':' + p(m) + ':' + p(s) + '.' + p(cs);
-}
-function buildAss(segs, start, end, styleKey) {
-  const st = CAP_STYLES[styleKey] || CAP_STYLES.klasik;
-  const styleLine = 'Style: Klipin,DejaVu Sans,' + st.font + ',' + st.primary + ',&H0000FFFF,' +
-    st.outlineCol + ',' + st.back + ',' + st.bold + ',0,0,0,100,100,0,0,' + st.borderStyle + ',' +
-    st.outline + ',' + st.shadow + ',' + st.align + ',24,24,' + st.marginV + ',1';
-  let out = '[Script Info]\nScriptType: v4.00+\nPlayResX: 720\nPlayResY: 1280\nWrapStyle: 0\n\n' +
-    '[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n' +
-    styleLine + '\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n';
-  let cues = 0;
+function buildCues(segs, start, end, upper) {
+  const cues = [];
   const inRange = segs.filter(function(s) { return s.start >= start - 1 && s.start < end; });
   inRange.forEach(function(s, i) {
     const next = i + 1 < inRange.length ? inRange[i + 1].start : s.start + 4;
     const cs = Math.max(s.start, start) - start;
     const ce = Math.min(next, end) - start;
-    let text = String(s.text || '').replace(/\s+/g, ' ').replace(/[{}]/g, '').trim();
+    let text = String(s.text || '').replace(/\s+/g, ' ').trim();
     if (!text || ce <= cs) return;
-    if (st.upper) text = text.toUpperCase();
+    if (upper) text = text.toUpperCase();
     const words = text.split(' ');
     const chunks = [];
     for (let w = 0; w < words.length; w += 6) chunks.push(words.slice(w, w + 6).join(' '));
-    const totalWords = words.length;
     let acc = 0;
     chunks.forEach(function(ch) {
-      const frac = ch.split(' ').length / totalWords;
-      const cStart = cs + (ce - cs) * acc;
-      const cEnd = cs + (ce - cs) * (acc + frac);
+      const frac = ch.split(' ').length / words.length;
+      const t0 = cs + (ce - cs) * acc;
+      const t1 = cs + (ce - cs) * (acc + frac);
       acc += frac;
-      if (cEnd > cStart) {
-        out += 'Dialogue: 0,' + assTs(cStart) + ',' + assTs(cEnd) + ',Klipin,,0,0,0,,' + ch + '\n';
-        cues++;
-      }
+      if (t1 > t0) cues.push({t0: t0, t1: t1, text: ch});
     });
   });
-  return cues ? out : '';
+  return cues;
 }
-
-function srtTs(sec) {
-  sec = Math.max(0, sec);
-  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60),
-        s = Math.floor(sec % 60), ms = Math.floor((sec - Math.floor(sec)) * 1000);
-  function p(n, l) { return String(n).padStart(l, '0'); }
-  return p(h,2) + ':' + p(m,2) + ':' + p(s,2) + ',' + p(ms,3);
-}
-function buildSrt(segs, start, end) {
-  const inRange = segs.filter(function(s) { return s.start >= start - 1 && s.start < end; });
-  const cues = [];
-  inRange.forEach(function(s, i) {
-    const next = i + 1 < inRange.length ? inRange[i + 1].start : s.start + 4;
-    const cs = Math.max(s.start, start) - start;
-    const ce = Math.min(next, end) - start;
-    const text = String(s.text || '').replace(/\s+/g, ' ').trim();
-    if (text && ce > cs) cues.push((cues.length + 1) + '\n' + srtTs(cs) + ' --> ' + srtTs(ce) + '\n' + text);
+function wrapLines(ctx, text, maxW) {
+  const words = text.split(' ');
+  const lines = [];
+  let cur = '';
+  words.forEach(function(w) {
+    const test = cur ? cur + ' ' + w : w;
+    if (ctx.measureText(test).width > maxW && cur) { lines.push(cur); cur = w; }
+    else cur = test;
   });
-  return cues.join('\n\n');
+  if (cur) lines.push(cur);
+  return lines;
+}
+function roundRectPath(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(x, y, w, h, r);
+  else ctx.rect(x, y, w, h);
+}
+async function renderCuePng(text, cfg, dims) {
+  const W = dims.w;
+  const stripH = Math.round(dims.h * 0.30);
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = stripH;
+  const ctx = cv.getContext('2d');
+  const scale = W / 720;
+  let px = cfg.px * scale;
+  const maxW = W * 0.92;
+  function setFont() { ctx.font = cfg.weight + ' ' + px + 'px ' + cfg.family; }
+  setFont();
+  let lines = wrapLines(ctx, text, maxW);
+  while (lines.length > 2 && px > 11) { px *= 0.9; setFont(); lines = wrapLines(ctx, text, maxW); }
+  if (lines.length > 2) lines = [lines[0], lines.slice(1).join(' ')];
+  const lineH = px * 1.22;
+  const cy = stripH / 2;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.lineJoin = 'round';
+  if (cfg.box) {
+    let bw = 0;
+    lines.forEach(function(l) { bw = Math.max(bw, ctx.measureText(l).width); });
+    bw += px * 0.9;
+    const bh = lineH * lines.length + px * 0.5;
+    ctx.fillStyle = 'rgba(0,0,0,0.72)';
+    roundRectPath(ctx, (W - bw) / 2, cy - bh / 2, bw, bh, Math.max(4, px * 0.12));
+    ctx.fill();
+  }
+  lines.forEach(function(l, li) {
+    const y = cy + (li - (lines.length - 1) / 2) * lineH;
+    if (cfg.softShadow) { ctx.shadowColor = 'rgba(0,0,0,0.9)'; ctx.shadowBlur = 6; ctx.shadowOffsetY = 1; }
+    if (cfg.stroke) { ctx.strokeStyle = cfg.stroke; ctx.lineWidth = px * cfg.strokeRatio; ctx.strokeText(l, W / 2, y); }
+    ctx.fillStyle = cfg.fill;
+    ctx.fillText(l, W / 2, y);
+    ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+  });
+  const blob = await new Promise(function(res) { cv.toBlob(res, 'image/png'); });
+  const buf = await blob.arrayBuffer();
+  return new Uint8Array(buf);
+}
+function outDims(vertical) {
+  if (vertical) return {w: 1080, h: 1920};
+  const sw = SRC_W || 1280, sh = SRC_H || 720;
+  const h = Math.min(720, sh);
+  const w = Math.max(2, Math.round((sw * h / sh) / 2) * 2);
+  return {w: w, h: h};
 }
 
 let FF_INPUT_KEY = '';
@@ -704,23 +736,34 @@ async function doCut() {
     }
     if (useCap && segs.length) {
       const styleKey = (document.getElementById('cap-style') || {}).value || 'klasik';
-      const ass = buildAss(segs, start, end, styleKey);
-      if (ass.trim()) {
-        setStatus('Menempel caption…', false);
-        await ff.writeFile('cap.ass', new TextEncoder().encode(ass));
-        let code2 = await ff.exec(['-i', 'raw.mp4', '-vf', 'ass=cap.ass',
-          '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '26', '-c:a', 'copy', 'out.mp4']);
-        if (code2 === 0) {
-          finalName = 'out.mp4';
-          capNote = 'Caption sudah menempel di video (gaya: ' + styleKey + ').';
-        } else {
-          const srt = buildSrt(segs, start, end);
-          await ff.writeFile('cap.srt', new TextEncoder().encode(srt));
-          code2 = await ff.exec(['-i', 'raw.mp4', '-vf', 'subtitles=cap.srt',
-            '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '26', '-c:a', 'copy', 'out.mp4']);
-          if (code2 === 0) { finalName = 'out.mp4'; capNote = 'Caption sudah menempel di video (gaya cadangan standar).'; }
-          else { capNote = 'Caption gagal ditempel (keterbatasan mesin browser), video jadi tanpa caption.'; }
+      const cfg = CAP_STYLE_CFG[styleKey] || CAP_STYLE_CFG.klasik;
+      const cues = buildCues(segs, start, end, cfg.upper).slice(0, 80);
+      if (cues.length) {
+        setStatus('Menggambar & menempel caption…', false);
+        try { await document.fonts.ready; } catch (e) { /* abaikan */ }
+        const dims = outDims(vertical);
+        const stripH = Math.round(dims.h * 0.30);
+        const inputs = ['-i', 'raw.mp4'];
+        for (let i = 0; i < cues.length; i++) {
+          const png = await renderCuePng(cues[i].text, cfg, dims);
+          await ff.writeFile('cap' + i + '.png', png);
+          inputs.push('-i', 'cap' + i + '.png');
         }
+        let fc = '';
+        let prev = '[0:v]';
+        cues.forEach(function(cue, i) {
+          const y = cfg.centerY ? Math.round(dims.h * cfg.centerY)
+                                : (dims.h - stripH - Math.round(dims.h * cfg.marginPct));
+          const lbl = i === cues.length - 1 ? '[vout]' : '[v' + i + ']';
+          fc += prev + '[' + (i + 1) + ':v]overlay=0:' + y +
+                ":enable='between(t," + cue.t0.toFixed(2) + ',' + cue.t1.toFixed(2) + ")'" + lbl + ';';
+          prev = lbl;
+        });
+        fc = fc.replace(/;$/, '');
+        const code2 = await ff.exec(inputs.concat(['-filter_complex', fc, '-map', '[vout]', '-map', '0:a',
+          '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '26', '-c:a', 'copy', 'out.mp4']));
+        if (code2 === 0) { finalName = 'out.mp4'; capNote = 'Caption sudah menempel di video (gaya: ' + styleKey + ').'; }
+        else { capNote = 'Caption gagal ditempel, video jadi tanpa caption.'; }
       } else {
         capNote = 'Tidak ada ucapan pada rentang waktu ini, jadi tidak ada caption yang ditempel.';
       }
