@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Klipin — Tools Clipper AI</title>
+<meta name="description" content="Klipin: tempel link YouTube, AI nyari momen terbaik + bikin hook, lalu potong clip-nya langsung dari browser.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0a0614; --panel:#150d26; --panel2:#1c1233; --line:#2e2050;
+    --text:#f2edff; --muted:#a293c4; --pink:#ff5c8a; --orange:#ffb35c;
+    --grad:linear-gradient(92deg,#ff5c8a,#ffb35c);
+    --r:20px;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:var(--bg);color:var(--text);font-family:'Plus Jakarta Sans',system-ui,sans-serif;min-height:100vh}
+  body::before{content:'';position:fixed;inset:0;background:
+    radial-gradient(700px 340px at 90% -80px, rgba(255,92,138,.14), transparent 65%),
+    radial-gradient(560px 300px at -10% 40%, rgba(255,179,92,.09), transparent 65%);pointer-events:none}
+  .wrap{max-width:860px;margin:0 auto;padding:0 20px 80px;position:relative}
+
+  header{padding:34px 0 8px;text-align:left}
+  .logo{font-size:2.3rem;font-weight:800;letter-spacing:-.03em;line-height:1}
+  .logo .dot{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .tagline{color:var(--muted);margin-top:8px;font-size:.95rem;line-height:1.55;max-width:520px}
+  .tagline b{color:var(--text)}
+
+  .step{display:flex;align-items:center;gap:11px;margin:32px 0 14px}
+  .step .n{width:30px;height:30px;border-radius:50%;background:var(--grad);color:#23102b;font-weight:800;font-size:.9rem;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .step .t{font-size:1.18rem;font-weight:800;letter-spacing:-.01em}
+  .step .s{color:var(--muted);font-size:.82rem;margin-left:auto;text-align:right}
+
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:22px}
+  label{display:block;font-size:.72rem;font-weight:700;color:var(--muted);letter-spacing:.12em;text-transform:uppercase;margin-bottom:8px}
+  input[type=url],input[type=text],select,textarea{width:100%;background:var(--panel2);border:1px solid var(--line);border-radius:13px;color:var(--text);font-family:inherit;font-size:.95rem;padding:13px 15px;outline:none;transition:border-color .18s, box-shadow .18s;appearance:none}
+  textarea{line-height:1.55;resize:vertical;appearance:auto}
+  input:focus,select:focus,textarea:focus{border-color:var(--pink);box-shadow:0 0 0 3px rgba(255,92,138,.15)}
+  select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23a293c4' stroke-width='1.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 14px center;padding-right:36px;cursor:pointer}
+  select option{background:var(--panel2)}
+  .row{margin-bottom:16px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media (max-width:620px){.grid2{grid-template-columns:1fr}}
+  details.manual{border:1px dashed var(--line);border-radius:13px;padding:12px 16px;margin:-2px 0 16px}
+  details.manual summary{cursor:pointer;font-size:.88rem;color:var(--orange);font-weight:600}
+  details.manual .hint{font-size:.82rem;color:var(--muted);line-height:1.65;margin:10px 0}
+
+  .btn-grad{width:100%;padding:16px;border:none;border-radius:15px;background:var(--grad);color:#2b0f1e;
+    font-family:inherit;font-size:1.03rem;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;transition:all .18s}
+  .btn-grad:hover{filter:brightness(1.08);transform:translateY(-1px);box-shadow:0 12px 30px rgba(255,92,138,.25)}
+  .btn-grad:disabled{opacity:.45;cursor:not-allowed;transform:none;box-shadow:none}
+  .btn-line{background:transparent;border:1px solid var(--line);color:var(--text);border-radius:12px;padding:10px 16px;font-size:.85rem;font-weight:600;cursor:pointer;font-family:inherit;transition:all .15s;text-decoration:none;display:inline-flex;align-items:center;gap:6px}
+  .btn-line:hover{border-color:var(--pink);color:var(--pink)}
+  .btn-line:disabled{opacity:.4;cursor:not-allowed}
+  .spinner{width:19px;height:19px;border:2.5px solid rgba(255,255,255,.25);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0}
+  .spinner.dark{border-color:var(--line);border-top-color:var(--pink)}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .loading{display:flex;flex-direction:column;align-items:center;gap:13px;color:var(--muted);padding:38px 0;text-align:center;font-size:.92rem}
+  .error-box{background:rgba(255,92,110,.08);border:1px solid rgba(255,92,110,.3);color:#ffb3c0;border-radius:13px;padding:15px 17px;font-size:.9rem;line-height:1.6;margin-top:16px}
+  .note{font-size:.83rem;color:var(--muted);line-height:1.65}
+
+  /* HASIL */
+  .vhead{display:flex;gap:15px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:15px;margin:20px 0 13px}
+  .vhead img{width:112px;height:66px;object-fit:cover;border-radius:11px;flex-shrink:0;background:var(--panel2)}
+  .vhead .vt{font-weight:800;font-size:1.02rem}
+  .vhead .vm{color:var(--muted);font-size:.8rem;margin-top:3px;line-height:1.5}
+  .src{display:inline-block;font-size:.67rem;font-weight:700;letter-spacing:.05em;padding:3px 9px;border-radius:99px;background:rgba(255,179,92,.12);color:var(--orange);border:1px solid rgba(255,179,92,.35);margin-left:7px;vertical-align:2px}
+  .clip{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:19px;margin-bottom:11px;animation:up .3s ease both}
+  @keyframes up{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}
+  .clip-top{display:flex;gap:11px;align-items:flex-start}
+  .clip-hook{font-weight:700;font-size:1.04rem;line-height:1.45;flex:1}
+  .score{font-weight:800;font-size:.83rem;padding:5px 11px;border-radius:99px;flex-shrink:0;background:rgba(255,92,138,.13);color:#ff8fab;border:1px solid rgba(255,92,138,.35)}
+  .score.hi{background:rgba(120,255,170,.1);color:#7dffb0;border-color:rgba(120,255,170,.3)}
+  .score.mid{background:rgba(255,179,92,.1);color:var(--orange);border-color:rgba(255,179,92,.3)}
+  .timebar{display:flex;gap:8px;align-items:center;margin:12px 0 9px;flex-wrap:wrap}
+  .time{font-weight:800;font-size:.88rem;background:var(--panel2);border:1px solid var(--line);padding:6px 12px;border-radius:10px}
+  .time span{color:var(--muted);margin:0 4px}
+  .dur{font-size:.78rem;color:var(--muted)}
+  .reason{font-size:.87rem;color:var(--muted);line-height:1.65;border-top:1px solid var(--line);padding-top:10px}
+  .tags{font-size:.82rem;color:#c4a8ff;line-height:1.8;margin-top:6px;word-break:break-word}
+  .clip-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:12px}
+  .act{background:transparent;border:1px solid var(--line);color:var(--muted);border-radius:10px;padding:7px 13px;font-size:.79rem;font-weight:600;cursor:pointer;font-family:inherit;transition:all .15s;text-decoration:none;display:inline-flex;align-items:center;gap:5px}
+  .act:hover{color:var(--text);border-color:var(--text)}
+  .act.cut{background:var(--grad);color:#2b0f1e;border:none}
+  .act.cut:hover{filter:brightness(1.1);color:#2b0f1e}
+  .act.done{color:#7dffb0;border-color:rgba(120,255,170,.4)}
+
+  /* STUDIO */
+  .drop{border:2px dashed var(--line);border-radius:16px;padding:26px 18px;text-align:center;cursor:pointer;transition:all .18s;background:var(--panel2)}
+  .drop:hover,.drop.over{border-color:var(--pink);background:rgba(255,92,138,.05)}
+  .drop .big{font-size:1.7rem}
+  .drop .dt{font-weight:700;margin-top:7px}
+  .drop .ds{color:var(--muted);font-size:.8rem;margin-top:4px;line-height:1.55}
+  .checks{display:flex;gap:16px;flex-wrap:wrap}
+  .checks label{display:inline-flex;align-items:center;gap:7px;font-size:.88rem;color:var(--text);letter-spacing:0;text-transform:none;margin:0;cursor:pointer;font-weight:600}
+  .checks input{width:17px;height:17px;accent-color:var(--pink)}
+  .bar{height:10px;background:var(--panel2);border:1px solid var(--line);border-radius:99px;overflow:hidden;display:none;margin-top:13px}
+  .bar i{display:block;height:100%;width:0%;background:var(--grad);transition:width .25s}
+  .cut-status{font-size:.85rem;color:var(--muted);margin-top:11px;line-height:1.6;display:none}
+  .cut-status.show{display:block}
+  .cut-status.err{color:#ffb3c0}
+  video.out{width:100%;border-radius:14px;margin-top:14px;display:none;background:#000}
+  .hook-card{display:flex;gap:11px;align-items:flex-start;background:var(--panel2);border:1px solid var(--line);border-radius:14px;padding:13px 15px;margin-top:9px}
+  .hook-card .hx{flex:1}
+  .hook-card .htx{font-weight:600;font-size:.95rem;line-height:1.55}
+  .angle{display:inline-block;font-size:.66rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;padding:3px 8px;border-radius:99px;background:rgba(255,92,138,.13);color:#ff8fab;border:1px solid rgba(255,92,138,.3);margin-bottom:6px}
+  .hist-chip{display:flex;gap:11px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:15px;padding:11px 13px;margin-bottom:8px}
+  .hist-chip img{width:66px;height:42px;object-fit:cover;border-radius:8px;background:var(--panel2);flex-shrink:0}
+  .hist-chip .hm{flex:1;min-width:0}
+  .hist-chip .ht{font-size:.85rem;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .hist-chip .hs{font-size:.75rem;color:var(--muted);margin-top:2px}
+  .empty{color:var(--muted);font-size:.87rem;border:1px dashed var(--line);border-radius:13px;padding:17px;text-align:center;line-height:1.6}
+  footer{text-align:center;color:var(--muted);font-size:.79rem;padding:36px 0 4px;line-height:1.7}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">Klipin<span class="dot">.</span></div>
+    <p class="tagline">Tempel link YouTube — <b>AI yang nyari momen terbaiknya</b>, lengkap sama hook & hashtag. Terus <b>potong clip-nya langsung di browser</b>, nggak pake ribet.</p>
+  </header>
+
+  <!-- LANGKAH 1 -->
+  <div class="step"><span class="n">1</span><span class="t">Cari momen</span><span class="s">AI baca transcript<br>& milihin momen</span></div>
+  <div class="card">
+    <div class="row">
+      <label>Link video YouTube</label>
+      <input type="url" id="yt-url" placeholder="https://youtube.com/watch?v=... atau https://youtu.be/...">
+    </div>
+    <details class="manual">
+      <summary>📄 Transcript otomatis gagal? Tempel manual di sini</summary>
+      <div class="hint">Di server cloud, YouTube kadang ngeblokir ambil transcript. Buka video di YouTube → <b>…</b>/deskripsi → <b>Buka transkrip</b> → salin semua teks bertimestamp → tempel di sini.</div>
+      <textarea id="manual-transcript" rows="5" placeholder="0:00 teks transcript di sini..."></textarea>
+    </details>
+    <div class="grid2">
+      <div class="row">
+        <label>Platform target</label>
+        <select id="platform">
+          <option>YouTube Shorts</option><option>TikTok</option><option>Instagram Reels</option>
+          <option>Twitter/X</option><option>YouTube (panjang)</option>
+        </select>
+      </div>
+      <div class="row">
+        <label>Jenis konten</label>
+        <select id="content-type">
+          <option>VTuber / Vstreamer</option><option>Gaming</option><option>IRL / Just Chatting</option>
+          <option>Variety / Campuran</option><option>Edukasi</option><option>Podcast</option>
+          <option>Olahraga / Highlight</option><option>Berita / Current Events</option>
+          <option>Musik / Concert</option><option>Vlog</option><option>Review / Tech</option>
+        </select>
+      </div>
+    </div>
+    <div class="grid2">
+      <div class="row">
+        <label>Target durasi clip</label>
+        <select id="target-duration">
+          <option value="30">±30 detik</option><option value="45">±45 detik</option>
+          <option value="60" selected>±60 detik</option><option value="90">±90 detik</option>
+        </select>
+      </div>
+      <div class="row">
+        <label>Jumlah rekomendasi</label>
+        <select id="max-clips">
+          <option value="3">3 clip</option><option value="5" selected>5 clip</option>
+          <option value="7">7 clip</option><option value="10">10 clip</option>
+        </select>
+      </div>
+    </div>
+    <button class="btn-grad" id="analyze-btn" onclick="analyze()">✨ Cari Momen Terbaik</button>
+  </div>
+  <div id="results"></div>
+
+  <!-- LANGKAH 2 -->
+  <div class="step"><span class="n">2</span><span class="t">Studio Potong</span><span class="s">dipotong di browser kamu<br>file nggak diupload ke server</span></div>
+  <div class="card">
+    <div class="row">
+      <label>File video sumber</label>
+      <div class="drop" id="drop">
+        <div class="big">🎬</div>
+        <div class="dt" id="drop-title">Tap buat pilih video, atau jatuhkan file di sini</div>
+        <div class="ds">Video hasil download dari YouTube (MP4/WebM). Disarankan ≤300MB & ≤720p biar ringan di HP.<br>Belum punya videonya? Download dulu pakai downloader favoritmu, atau potong dari file apa pun.</div>
+      </div>
+      <input type="file" id="file-input" accept="video/*" style="display:none">
+    </div>
+    <div class="grid2">
+      <div class="row">
+        <label>Mulai (mnt:dtk)</label>
+        <input type="text" id="cut-start" value="0:00" placeholder="0:00">
+      </div>
+      <div class="row">
+        <label>Selesai (mnt:dtk)</label>
+        <input type="text" id="cut-end" value="0:30" placeholder="0:30">
+      </div>
+    </div>
+    <div class="row checks">
+      <label><input type="checkbox" id="cut-vertical"> Vertikal 9:16 (blur)</label>
+      <label><input type="checkbox" id="cut-captions" checked> Caption dari transcript</label>
+    </div>
+    <button class="btn-grad" id="cut-btn" onclick="doCut()">✂️ Potong Sekarang</button>
+    <div class="bar" id="cut-bar"><i></i></div>
+    <div class="cut-status" id="cut-status"></div>
+    <video class="out" id="out-video" controls playsinline></video>
+    <div id="dl-row" style="margin-top:13px;display:none">
+      <a class="btn-line" id="dl-link" href="#" download="klipin.mp4">⬇️ Download MP4</a>
+    </div>
+    <p class="note" style="margin-top:14px">Mesin potongnya (ffmpeg) dimuat sekali dari internet (±30MB, habis itu ke-cache). Di HP, motong clip 30–60 detik bisa makan waktu 1–5 menit — sabar ya, jangan tutup tab-nya.</p>
+  </div>
+
+  <!-- GENERATOR HOOK -->
+  <div class="step"><span class="n">3</span><span class="t">Generator Hook</span><span class="s">bikin banyak variasi hook<br>dari topik apa aja</span></div>
+  <div class="card">
+    <div class="row">
+      <label>Topik / cuplikan isi video</label>
+      <textarea id="hook-text" rows="4" placeholder="Contoh: streamer ketemu hacker di ranked, awalnya diremehin, endingnya hacker-nya yang kabur..."></textarea>
+    </div>
+    <div class="row">
+      <label>Jumlah variasi</label>
+      <select id="hook-count">
+        <option value="5">5 hook</option><option value="8">8 hook</option>
+        <option value="10" selected>10 hook</option><option value="15">15 hook</option>
+      </select>
+    </div>
+    <button class="btn-grad" id="hook-btn" onclick="genHooks()">🎣 Generate Hook</button>
+    <p class="note" style="margin-top:12px">Gaya hook ngikutin pilihan Platform & Jenis Konten di Langkah 1. Tiap hasil bisa langsung disalin.</p>
+    <div id="hook-results"></div>
+  </div>
+
+  <!-- RIWAYAT -->
+  <div class="step"><span class="n">4</span><span class="t">Riwayat di perangkat ini</span><span class="s">kesimpan lokal<br>di browser kamu</span></div>
+  <div id="history-list"><div class="empty">Belum ada riwayat. Hasil analisis pertamamu bakal muncul di sini.</div></div>
+  <div style="margin-top:10px"><button class="btn-line" onclick="clearHistory()">🗑 Bersihkan riwayat</button></div>
+
+  <footer>Klipin — tools clipper AI · analisis di server, motong di browser · deploy-friendly di Vercel</footer>
+</div>
+
+<script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js"></script>
+<script src="https://unpkg.com/@ffmpeg/util@0.12.1/dist/umd/index.js"></script>
+<script>
+let CURRENT = null;      // hasil analisis terakhir {clips, video_id, segments, ...}
+let CUT_BIND = null;     // {segments:[...]} buat caption di studio
+let SRC_FILE = null;
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function toSec(t) {
+  const p = String(t).trim().split(':').map(Number);
+  if (p.some(isNaN)) return NaN;
+  if (p.length === 3) return p[0]*3600 + p[1]*60 + p[2];
+  if (p.length === 2) return p[0]*60 + p[1];
+  return p[0];
+}
+function fmtClock(sec) {
+  sec = Math.max(0, Math.floor(sec));
+  const m = Math.floor(sec / 60), s = sec % 60;
+  const h = Math.floor(m / 60);
+  return h > 0 ? h + ':' + String(m % 60).padStart(2,'0') + ':' + String(s).padStart(2,'0')
+               : m + ':' + String(s).padStart(2,'0');
+}
+function srcLabel(s) {
+  const map = {youtube:'transcript otomatis', manual:'transcript manual', transcriptapi:'TranscriptAPI', supadata:'Supadata'};
+  return map[s] || s || '';
+}
+function copyText(btn, text) {
+  navigator.clipboard.writeText(text).then(function() {
+    const o = btn.innerHTML;
+    btn.innerHTML = '✓ Tersalin'; btn.classList.add('done');
+    setTimeout(function() { btn.innerHTML = o; btn.classList.remove('done'); }, 1400);
+  });
+}
+
+/* ===== ANALISIS ===== */
+async function analyze() {
+  const url = document.getElementById('yt-url').value.trim();
+  const box = document.getElementById('results');
+  if (!url) { box.innerHTML = '<div class="error-box">Masukkin link YouTube dulu ya! 🔗</div>'; return; }
+  const btn = document.getElementById('analyze-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Lagi nyari momen…';
+  box.innerHTML = '<div class="loading"><div class="spinner dark" style="width:30px;height:30px"></div><div>Lagi baca transcript & milihin momen terbaik…</div></div>';
+  try {
+    const res = await fetch('/analyze', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        url: url,
+        platform: document.getElementById('platform').value,
+        contentType: document.getElementById('content-type').value,
+        targetDuration: document.getElementById('target-duration').value,
+        maxClips: document.getElementById('max-clips').value,
+        transcript: document.getElementById('manual-transcript').value.trim()
+      })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    CURRENT = data;
+    CUT_BIND = {segments: data.segments || []};
+    renderResults(data);
+    saveHistory(data);
+  } catch (e) {
+    box.innerHTML = '<div class="error-box">Gagal analisis: ' + esc(e.message || 'Coba lagi ya!') + '</div>';
+  }
+  btn.disabled = false;
+  btn.innerHTML = '✨ Cari Momen Terbaik';
+}
+
+function renderResults(data) {
+  const box = document.getElementById('results');
+  const clips = Array.isArray(data.clips) ? data.clips : [];
+  let h = '';
+  h += '<div class="vhead"><img src="https://img.youtube.com/vi/' + esc(data.video_id) + '/mqdefault.jpg" alt="">';
+  h += '<div><div class="vt">' + clips.length + ' momen ketemu ✨<span class="src">' + esc(srcLabel(data.transcript_source)) + '</span></div>';
+  h += '<div class="vm">' + (data.total_segments || 0) + ' segmen dianalisis · klik <b>Potong</b> buat ngirim momen ke Studio</div></div></div>';
+  clips.forEach(function(c, i) {
+    const d = toSec(c.end) - toSec(c.start);
+    h += '<article class="clip">';
+    h += '<div class="clip-top"><div class="clip-hook">' + esc(c.hook) + '</div>';
+    h += '<span class="score ' + (c.score >= 8 ? 'hi' : c.score >= 6 ? 'mid' : '') + '">' + c.score + '/10</span></div>';
+    h += '<div class="timebar"><span class="time">▶ ' + esc(c.start) + '<span>→</span>' + esc(c.end) + '</span>';
+    if (d > 0) h += '<span class="dur">±' + Math.round(d) + ' dtk</span>';
+    h += '</div>';
+    if (c.reason) h += '<p class="reason">💬 ' + esc(c.reason) + '</p>';
+    if (c.hashtags) h += '<div class="tags">' + esc(c.hashtags) + '</div>';
+    h += '<div class="clip-actions">';
+    h += '<a class="act" target="_blank" href="https://www.youtube.com/watch?v=' + esc(data.video_id) + '&t=' + Math.floor(toSec(c.start)) + '">▶ Cek di YT</a>';
+    h += '<button class="act" onclick="copyIdx(this,' + i + ',\'hook\')">⎘ Hook</button>';
+    if (c.hashtags) h += '<button class="act" onclick="copyIdx(this,' + i + ',\'hashtags\')"># Hashtag</button>';
+    h += '<button class="act cut" onclick="sendToStudio(' + i + ')">✂️ Potong</button>';
+    h += '</div></article>';
+  });
+  box.innerHTML = h;
+}
+
+function copyIdx(btn, i, field) {
+  if (CURRENT && CURRENT.clips[i]) copyText(btn, CURRENT.clips[i][field] || '');
+}
+
+function sendToStudio(i) {
+  if (!CURRENT || !CURRENT.clips[i]) return;
+  const c = CURRENT.clips[i];
+  document.getElementById('cut-start').value = c.start;
+  document.getElementById('cut-end').value = c.end;
+  CUT_BIND = {segments: CURRENT.segments || []};
+  document.getElementById('cut-btn').scrollIntoView({behavior: 'smooth', block: 'center'});
+  setStatus(SRC_FILE ? 'Momen ' + c.start + ' → ' + c.end + ' siap dipotong. Klik Potong Sekarang ✂️'
+                     : 'Timestamp udah diset ke ' + c.start + ' → ' + c.end + '. Pilih file videonya dulu di Studio ya 🎬', false);
+}
+
+/* ===== RIWAYAT LOKAL ===== */
+const HKEY = 'klipin_history_v1';
+function loadHist() {
+  try { return JSON.parse(localStorage.getItem(HKEY) || '[]'); } catch (e) { return []; }
+}
+function saveHistory(data) {
+  const items = loadHist();
+  items.unshift({
+    ts: Date.now(), video_id: data.video_id,
+    platform: document.getElementById('platform').value,
+    clips: data.clips, segments: (data.segments || []).slice(0, 800),
+    transcript_source: data.transcript_source, total_segments: data.total_segments
+  });
+  try { localStorage.setItem(HKEY, JSON.stringify(items.slice(0, 15))); } catch (e) { /* penuh, abaikan */ }
+  renderHistory();
+}
+function renderHistory() {
+  const box = document.getElementById('history-list');
+  const items = loadHist();
+  if (!items.length) {
+    box.innerHTML = '<div class="empty">Belum ada riwayat. Hasil analisis pertamamu bakal muncul di sini.</div>';
+    return;
+  }
+  box.innerHTML = items.map(function(h, i) {
+    const tgl = new Date(h.ts).toLocaleString('id-ID', {day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'});
+    return '<div class="hist-chip">' +
+      '<img src="https://img.youtube.com/vi/' + esc(h.video_id) + '/mqdefault.jpg" alt="">' +
+      '<div class="hm"><div class="ht">' + h.clips.length + ' momen · ' + esc(h.video_id) + '</div>' +
+      '<div class="hs">' + esc(h.platform || '') + ' · ' + esc(tgl) + '</div></div>' +
+      '<button class="act" onclick="openHist(' + i + ')">Buka</button></div>';
+  }).join('');
+}
+function openHist(i) {
+  const h = loadHist()[i];
+  if (!h) return;
+  CURRENT = {clips: h.clips, video_id: h.video_id, segments: h.segments || [],
+             total_segments: h.total_segments || (h.segments || []).length,
+             transcript_source: h.transcript_source};
+  CUT_BIND = {segments: h.segments || []};
+  renderResults(CURRENT);
+  window.scrollTo({top: 0, behavior: 'smooth'});
+}
+function clearHistory() {
+  localStorage.removeItem(HKEY);
+  renderHistory();
+}
+
+/* ===== STUDIO POTONG (ffmpeg.wasm) ===== */
+const drop = document.getElementById('drop');
+const fileInput = document.getElementById('file-input');
+drop.addEventListener('click', function() { fileInput.click(); });
+drop.addEventListener('dragover', function(e) { e.preventDefault(); drop.classList.add('over'); });
+drop.addEventListener('dragleave', function() { drop.classList.remove('over'); });
+drop.addEventListener('drop', function(e) {
+  e.preventDefault(); drop.classList.remove('over');
+  if (e.dataTransfer.files && e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', function() {
+  if (fileInput.files && fileInput.files[0]) setFile(fileInput.files[0]);
+});
+function setFile(f) {
+  SRC_FILE = f;
+  document.getElementById('drop-title').textContent = '🎬 ' + f.name;
+  setStatus('File siap: ' + f.name + ' (' + (f.size / 1048576).toFixed(1) + ' MB). Atur timestamp-nya, terus Potong Sekarang ✂️', false);
+}
+function setStatus(msg, isErr) {
+  const st = document.getElementById('cut-status');
+  st.className = 'cut-status show' + (isErr ? ' err' : '');
+  st.innerHTML = msg;
+}
+function setBar(pct) {
+  const bar = document.getElementById('cut-bar');
+  bar.style.display = 'block';
+  bar.querySelector('i').style.width = Math.max(0, Math.min(100, pct)) + '%';
+}
+
+let ffmpeg = null, ffLoading = null;
+async function loadFFmpeg() {
+  if (ffmpeg) return ffmpeg;
+  if (ffLoading) return ffLoading;
+  ffLoading = (async function() {
+    setStatus('⏳ Muat mesin potong (ffmpeg)… sekali aja, ±30MB.', false);
+    const base = 'https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd';
+    const core = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
+    const inst = new FFmpegWASM.FFmpeg();
+    inst.on('progress', function(e) {
+      if (e.progress > 0) setBar(e.progress * 100);
+    });
+    await inst.load({
+      classWorkerURL: await FFmpegUtil.toBlobURL(base + '/814.ffmpeg.js', 'text/javascript'),
+      coreURL: await FFmpegUtil.toBlobURL(core + '/ffmpeg-core.js', 'text/javascript'),
+      wasmURL: await FFmpegUtil.toBlobURL(core + '/ffmpeg-core.wasm', 'application/wasm')
+    });
+    ffmpeg = inst;
+    return inst;
+  })();
+  return ffLoading;
+}
+
+function srtTs(sec) {
+  sec = Math.max(0, sec);
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60),
+        s = Math.floor(sec % 60), ms = Math.floor((sec - Math.floor(sec)) * 1000);
+  function p(n, l) { return String(n).padStart(l, '0'); }
+  return p(h,2) + ':' + p(m,2) + ':' + p(s,2) + ',' + p(ms,3);
+}
+function buildSrt(segs, start, end) {
+  const inRange = segs.filter(function(s) { return s.start >= start - 1 && s.start < end; });
+  const cues = [];
+  inRange.forEach(function(s, i) {
+    const next = i + 1 < inRange.length ? inRange[i + 1].start : s.start + 4;
+    const cs = Math.max(s.start, start) - start;
+    const ce = Math.min(next, end) - start;
+    const text = String(s.text || '').replace(/\s+/g, ' ').trim();
+    if (text && ce > cs) cues.push((cues.length + 1) + '\n' + srtTs(cs) + ' --> ' + srtTs(ce) + '\n' + text);
+  });
+  return cues.join('\n\n');
+}
+
+async function doCut() {
+  const btn = document.getElementById('cut-btn');
+  if (!SRC_FILE) { setStatus('Pilih file videonya dulu ya 🎬', true); return; }
+  const start = toSec(document.getElementById('cut-start').value);
+  const end = toSec(document.getElementById('cut-end').value);
+  if (isNaN(start) || isNaN(end) || end <= start) { setStatus('Timestamp-nya nggak valid. Contoh format: 1:05 sampai 1:35.', true); return; }
+  if (end - start > 600) { setStatus('Durasi maksimal 10 menit per potong ya.', true); return; }
+  const vertical = document.getElementById('cut-vertical').checked;
+  const useCap = document.getElementById('cut-captions').checked;
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Lagi motong…';
+  document.getElementById('dl-row').style.display = 'none';
+  document.getElementById('out-video').style.display = 'none';
+  setBar(0);
+  try {
+    const ff = await loadFFmpeg();
+    setStatus('✂️ Lagi motong… jangan tutup tab ini. Di HP bisa 1–5 menit buat clip pendek.', false);
+    const ext = (SRC_FILE.name.split('.').pop() || 'mp4').toLowerCase().replace(/[^a-z0-9]/g, '') || 'mp4';
+    const inName = 'input.' + ext;
+    await ff.writeFile(inName, await FFmpegUtil.fetchFile(SRC_FILE));
+
+    let vf;
+    if (vertical) {
+      vf = 'split=2[a][b];[a]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=25:5[bg];[b]scale=1080:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2';
+    } else {
+      vf = "scale=-2:'min(720,ih)'";
+    }
+    let code = await ff.exec(['-ss', String(start), '-to', String(end), '-i', inName,
+      '-vf', vf, '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '26',
+      '-c:a', 'aac', '-b:a', '128k', 'raw.mp4']);
+    if (code !== 0) throw new Error('ffmpeg gagal motong (kode ' + code + '). Coba file/format lain atau durasi lebih pendek.');
+    let finalName = 'raw.mp4';
+
+    const segs = CUT_BIND && CUT_BIND.segments ? CUT_BIND.segments : [];
+    if (useCap && segs.length) {
+      const srt = buildSrt(segs, start, end);
+      if (srt.trim()) {
+        setStatus('💬 Nempel caption…', false);
+        await ff.writeFile('cap.srt', new TextEncoder().encode(srt));
+        const code2 = await ff.exec(['-i', 'raw.mp4', '-vf', 'subtitles=cap.srt',
+          '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '26', '-c:a', 'copy', 'out.mp4']);
+        if (code2 === 0) { finalName = 'out.mp4'; }
+        else { setStatus('⚠️ Caption gagal nempel (mesinnya terbatas), tapi videonya tetap jadi tanpa caption.', false); }
+      }
+    }
+
+    const data = await ff.readFile(finalName);
+    const blob = new Blob([data.buffer], {type: 'video/mp4'});
+    const url = URL.createObjectURL(blob);
+    const vid = document.getElementById('out-video');
+    vid.src = url;
+    vid.style.display = 'block';
+    const dl = document.getElementById('dl-link');
+    dl.href = url;
+    dl.setAttribute('download', 'klipin-' + fmtClock(start) + '-' + fmtClock(end) + '.mp4');
+    document.getElementById('dl-row').style.display = 'block';
+    setBar(100);
+    setStatus('✅ Beres! Ukuran hasil: ' + (blob.size / 1048576).toFixed(1) + ' MB. Tinggal download 👇', false);
+  } catch (e) {
+    setStatus('❌ ' + esc(e.message || 'Gagal motong.'), true);
+  }
+  btn.disabled = false;
+  btn.innerHTML = '✂️ Potong Sekarang';
+}
+
+/* ===== GENERATOR HOOK ===== */
+let HOOKS = [];
+async function genHooks() {
+  const text = document.getElementById('hook-text').value.trim();
+  const box = document.getElementById('hook-results');
+  if (text.length < 10) {
+    box.innerHTML = '<div class="error-box">Isi dulu topik / cuplikan isi videonya ya (minimal 10 karakter) 🎣</div>';
+    return;
+  }
+  const btn = document.getElementById('hook-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Lagi mikir hook…';
+  box.innerHTML = '';
+  try {
+    const res = await fetch('/api/hooks', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        text: text,
+        platform: document.getElementById('platform').value,
+        contentType: document.getElementById('content-type').value,
+        count: document.getElementById('hook-count').value
+      })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    HOOKS = data.hooks || [];
+    box.innerHTML = HOOKS.map(function(hk, i) {
+      return '<div class="hook-card"><div class="hx">' +
+        (hk.angle ? '<span class="angle">' + esc(hk.angle) + '</span>' : '') +
+        '<div class="htx">' + esc(hk.text) + '</div></div>' +
+        '<button class="act" onclick="copyHook(this,' + i + ')">⎘ Salin</button></div>';
+    }).join('');
+  } catch (e) {
+    box.innerHTML = '<div class="error-box">Gagal generate: ' + esc(e.message || 'Coba lagi ya!') + '</div>';
+  }
+  btn.disabled = false;
+  btn.innerHTML = '🎣 Generate Hook';
+}
+function copyHook(btn, i) {
+  if (HOOKS[i]) copyText(btn, HOOKS[i].text);
+}
+
+renderHistory();
+</script>
+</body>
+</html>
