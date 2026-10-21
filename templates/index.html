@@ -137,6 +137,16 @@
   .cap-preview.pv-tengah{align-items:center}
   .cap-preview.pv-tengah span{color:#fff;font-size:23px;font-weight:800;text-shadow:0 2px 0 #000,2px 0 0 #000,-2px 0 0 #000,0 -2px 0 #000,0 4px 14px rgba(0,0,0,.7)}
   .cap-preview.pv-minimal span{color:#fff;font-size:13px;font-weight:400;text-shadow:0 1px 4px rgba(0,0,0,.9)}
+  .cap-preview.pv-neon span{color:#4df3ff;font-size:20px;font-weight:800;text-transform:uppercase;text-shadow:0 0 6px rgba(77,243,255,.9),0 0 16px rgba(77,243,255,.55),1px 1px 0 #032630}
+  .cap-preview.pv-api span{color:#ffa62b;font-size:20px;font-weight:800;text-shadow:2px 2px 0 #000,-1px 1px 0 #000,0 3px 0 #000}
+  .cap-preview.pv-impact span{color:#ff4040;font-size:22px;font-weight:800;text-transform:uppercase;text-shadow:2px 2px 0 #000,-2px 2px 0 #000,2px -2px 0 #000,0 4px 0 #000}
+  .cap-preview.pv-invers span{color:#0c0d10;font-size:15px;font-weight:700;background:rgba(255,255,255,.94);padding:3px 8px;border-radius:2px}
+  .cap-preview.pv-mesin span{color:#c8ffd9;font-size:14px;font-weight:500;font-family:var(--mono);text-transform:uppercase;letter-spacing:.06em;text-shadow:0 1px 4px rgba(0,0,0,.95)}
+  .local-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:rgba(110,124,255,.07);border:1px solid rgba(110,124,255,.35);border-radius:5px;padding:10px 12px;font:10px var(--mono);letter-spacing:.05em;color:var(--dim)}
+  .local-bar b{color:var(--blue-bright)}
+  .local-bar label{display:flex;align-items:center;gap:6px;cursor:pointer;color:var(--text)}
+  .local-status{font:10px var(--mono);color:var(--dim);margin-top:8px;letter-spacing:.03em}
+  .local-status a{color:var(--mint);font-weight:700}
 
   /* HOOK & RIWAYAT */
   .hook-card{display:flex;gap:10px;align-items:flex-start;background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:11px 12px;margin-top:8px}
@@ -165,6 +175,7 @@
       <span class="status-chip hide-m"><span class="status-dot" id="dot-ai"></span>GROQ AI</span>
       <span class="status-chip hide-m"><span class="status-dot off" id="dot-wh"></span>WHISPER</span>
       <span class="status-chip" id="chip-transcript"><span class="status-dot off" id="dot-tr"></span>TRANSCRIPT</span>
+      <span class="status-chip" id="chip-local" style="display:none"><span class="status-dot" id="dot-local"></span>POTONG LANGSUNG</span>
     </div>
   </div>
   <div class="toolbar">
@@ -262,6 +273,11 @@
           <option value="pop">Pop Tebal — besar, kuning, uppercase</option>
           <option value="tengah">Tengah Besar — ala ClipForge</option>
           <option value="minimal">Minimal — kecil dan tipis</option>
+          <option value="neon">Neon Cyan — biru terang menyala, uppercase</option>
+          <option value="api">Api Oranye — oranye tebal</option>
+          <option value="impact">Impact Merah — merah ekstra tebal, uppercase</option>
+          <option value="invers">Invers — teks hitam di atas pita putih</option>
+          <option value="mesin">Mesin Ketik — mono hijau terminal, uppercase</option>
         </select>
         <div class="cap-preview" id="cap-preview"><span id="cap-preview-text">dia ngomong kayak gini di videonya</span></div>
       </div>
@@ -370,10 +386,15 @@ function copyText(btn, text) {
   });
 }
 
+let LOCAL_CUT = false;
 async function loadCaps() {
   try {
     const r = await fetch('/api/capabilities');
     const caps = await r.json();
+    if (caps.local_cut) {
+      LOCAL_CUT = true;
+      document.getElementById('chip-local').style.display = '';
+    }
     if (caps.transcript_api) {
       document.getElementById('dot-tr').classList.remove('off');
       document.getElementById('chip-transcript').lastChild.textContent = 'TRANSCRIPT API';
@@ -429,6 +450,11 @@ function renderResults(data) {
        (data.total_segments || 0) + ' SEGMEN · ID ' + esc(data.video_id) + '</div></div>';
   h += '<div class="clips-grid">';
   const isYt = /^[A-Za-z0-9_-]{11}$/.test(String(data.video_id || ''));
+  if (LOCAL_CUT && isYt) {
+    h += '<div class="local-bar" style="grid-column:1/-1"><span><b>MODE TERMUX AKTIF</b> — server lokal bisa download + potong langsung dari link.</span>' +
+         '<label><input type="checkbox" id="local-vertical" checked> Vertikal 9:16</label>' +
+         '<span>Gaya caption mengikuti pilihan di Studio Potong.</span></div>';
+  }
   clips.forEach(function(c, i) {
     const d = toSec(c.end) - toSec(c.start);
     h += '<article class="clip">';
@@ -444,10 +470,11 @@ function renderResults(data) {
     h += '<div class="clip-meta"><span class="tc">' + esc(c.start) + ' → ' + esc(c.end) + '</span><span>TARGET: ' + esc(document.getElementById('platform').value) + '</span></div>';
     h += '<div class="clip-actions">';
     h += '<button class="act cut" onclick="sendToStudio(' + i + ')">Potong clip ini</button>';
+    if (LOCAL_CUT && isYt) h += '<button class="act" onclick="cutLocal(' + i + ',this)">Potong langsung</button>';
     h += '<button class="act" onclick="copyIdx(this,' + i + ',\'hook\')">Salin hook</button>';
     if (c.hashtags) h += '<button class="act" onclick="copyIdx(this,' + i + ',\'hashtags\')">Salin hashtag</button>';
     if (isYt) h += '<a class="act" target="_blank" href="https://www.youtube.com/watch?v=' + esc(data.video_id) + '&t=' + Math.floor(toSec(c.start)) + '">Buka di YT</a>';
-    h += '</div></div></article>';
+    h += '</div><div class="local-status" id="local-status-' + i + '"></div></div></article>';
   });
   h += '</div>';
   box.innerHTML = h;
@@ -455,6 +482,59 @@ function renderResults(data) {
 
 function copyIdx(btn, i, field) {
   if (CURRENT && CURRENT.clips[i]) copyText(btn, CURRENT.clips[i][field] || '');
+}
+
+/* ===== POTONG LANGSUNG (mode lokal / Termux) =====
+   Server lokal (ffmpeg + yt-dlp beneran) yang download video sumber dan
+   memotong clip ini, lengkap dengan caption gaya terpilih. */
+async function cutLocal(i, btn) {
+  if (!CURRENT || !CURRENT.clips[i]) return;
+  const c = CURRENT.clips[i];
+  const st = document.getElementById('local-status-' + i);
+  const vertEl = document.getElementById('local-vertical');
+  btn.disabled = true;
+  st.textContent = 'Mengirim tugas ke server lokal…';
+  try {
+    const r = await fetch('/api/local/jobs', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        video_id: CURRENT.video_id,
+        clips: [{start: c.start, end: c.end, hook: c.hook || ''}],
+        style: (document.getElementById('cap-style') || {}).value || 'klasik',
+        vertical: vertEl ? vertEl.checked : true,
+        captions: true,
+        segments: CURRENT.segments || []
+      })
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || 'Server lokal menolak tugas.');
+    pollLocal(j.job_id, i, btn);
+  } catch (e) {
+    st.textContent = 'Gagal: ' + e.message;
+    btn.disabled = false;
+  }
+}
+async function pollLocal(jobId, i, btn) {
+  const st = document.getElementById('local-status-' + i);
+  try {
+    const r = await fetch('/api/local/jobs/' + jobId);
+    const j = await r.json();
+    if (j.status === 'done') {
+      st.innerHTML = 'Selesai dipotong server lokal. <a href="/api/local/jobs/' + jobId + '/file/0" download>Download klip MP4</a>';
+      btn.disabled = false;
+      return;
+    }
+    if (j.status === 'error') {
+      st.textContent = 'Gagal di server lokal: ' + (j.error || 'kesalahan tidak dikenal');
+      btn.disabled = false;
+      return;
+    }
+    st.textContent = j.phase || 'Memproses di server lokal…';
+    setTimeout(function() { pollLocal(jobId, i, btn); }, 2000);
+  } catch (e) {
+    setTimeout(function() { pollLocal(jobId, i, btn); }, 3000);
+  }
 }
 
 function sendToStudio(i) {
@@ -605,7 +685,12 @@ const CAP_STYLE_CFG = {
   kotak:   {px: 30, weight: 600, family: '"DM Sans", sans-serif', fill: '#ffffff', stroke: null, strokeRatio: 0, box: true, upper: false, marginPct: 0.04, centerY: null, softShadow: false},
   pop:     {px: 47, weight: 800, family: '"Space Grotesk", sans-serif', fill: '#ffe033', stroke: '#000000', strokeRatio: 0.20, box: false, upper: true, marginPct: 0.085, centerY: null, softShadow: false},
   tengah:  {px: 52, weight: 800, family: '"Space Grotesk", sans-serif', fill: '#ffffff', stroke: '#000000', strokeRatio: 0.15, box: false, upper: false, marginPct: 0, centerY: 0.58, softShadow: false},
-  minimal: {px: 25, weight: 400, family: '"DM Sans", sans-serif', fill: '#ffffff', stroke: null, strokeRatio: 0, box: false, upper: false, marginPct: 0.035, centerY: null, softShadow: true}
+  minimal: {px: 25, weight: 400, family: '"DM Sans", sans-serif', fill: '#ffffff', stroke: null, strokeRatio: 0, box: false, upper: false, marginPct: 0.035, centerY: null, softShadow: true},
+  neon:    {px: 44, weight: 800, family: '"Space Grotesk", sans-serif', fill: '#4df3ff', stroke: '#032630', strokeRatio: 0.10, box: false, upper: true, marginPct: 0.08, centerY: null, softShadow: false, glow: '#4df3ff'},
+  api:     {px: 42, weight: 800, family: '"Space Grotesk", sans-serif', fill: '#ffa62b', stroke: '#000000', strokeRatio: 0.18, box: false, upper: false, marginPct: 0.07, centerY: null, softShadow: false},
+  impact:  {px: 50, weight: 800, family: '"Space Grotesk", sans-serif', fill: '#ff4040', stroke: '#000000', strokeRatio: 0.24, box: false, upper: true, marginPct: 0.085, centerY: null, softShadow: false},
+  invers:  {px: 30, weight: 700, family: '"DM Sans", sans-serif', fill: '#0c0d10', stroke: null, strokeRatio: 0, box: true, boxColor: 'rgba(255,255,255,0.94)', upper: false, marginPct: 0.04, centerY: null, softShadow: false},
+  mesin:   {px: 27, weight: 500, family: '"DM Mono", monospace', fill: '#c8ffd9', stroke: '#04150a', strokeRatio: 0.10, box: false, upper: true, marginPct: 0.05, centerY: null, softShadow: true}
 };
 function updateCapPreview() {
   const sel = document.getElementById('cap-style');
@@ -677,16 +762,18 @@ async function renderCuePng(text, cfg, dims) {
     lines.forEach(function(l) { bw = Math.max(bw, ctx.measureText(l).width); });
     bw += px * 0.9;
     const bh = lineH * lines.length + px * 0.5;
-    ctx.fillStyle = 'rgba(0,0,0,0.72)';
+    ctx.fillStyle = cfg.boxColor || 'rgba(0,0,0,0.72)';
     roundRectPath(ctx, (W - bw) / 2, cy - bh / 2, bw, bh, Math.max(4, px * 0.12));
     ctx.fill();
   }
   lines.forEach(function(l, li) {
     const y = cy + (li - (lines.length - 1) / 2) * lineH;
     if (cfg.softShadow) { ctx.shadowColor = 'rgba(0,0,0,0.9)'; ctx.shadowBlur = 6; ctx.shadowOffsetY = 1; }
+    if (cfg.glow) { ctx.shadowColor = cfg.glow; ctx.shadowBlur = px * 0.55; }
     if (cfg.stroke) { ctx.strokeStyle = cfg.stroke; ctx.lineWidth = px * cfg.strokeRatio; ctx.strokeText(l, W / 2, y); }
     ctx.fillStyle = cfg.fill;
     ctx.fillText(l, W / 2, y);
+    if (cfg.glow) ctx.fillText(l, W / 2, y);
     ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
   });
   const blob = await new Promise(function(res) { cv.toBlob(res, 'image/png'); });

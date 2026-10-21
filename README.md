@@ -30,3 +30,11 @@ python app.py          # http://localhost:5003
 - Model Groq default `openai/gpt-oss-120b` (bisa dioverride via `GROQ_MODEL`).
 - Motong di browser HP kelas bawah bisa lambat (1–5 menit untuk clip pendek) dan file besar (>300MB) bisa gagal — itu batas wajar ffmpeg.wasm, bukan bug.
 - Jangan commit `.env`.
+
+## Mode Termux — potong langsung dari link
+
+Kalau Klipin dijalankan di Termux (HP sendiri), fitur **Potong Langsung**
+aktif: setelah analisis, tiap kartu clip bisa dipotong server lokal —
+yt-dlp mendownload video sumber (IP rumahan, tidak diblokir), ffmpeg
+memotong + menempel caption (10 gaya) — tanpa download manual dan tanpa
+ffmpeg.wasm. Lihat **PANDUAN-TERMUX.md** untuk install & cara jalanin.

@@ -1,5 +1,5 @@
 import os, json, re
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, send_file
 from dotenv import load_dotenv
 import requests
 from urllib.parse import urlparse, parse_qs
@@ -413,6 +413,7 @@ def capabilities():
         "transcript_api": bool(TRANSCRIPT_API_KEY or SUPADATA_API_KEY),
         "whisper": bool(os.getenv("GROQ_API_KEY")),
         "serverless": bool(os.getenv("VERCEL")),
+        "local_cut": bool(LOCAL_CUT),
     })
 
 WHISPER_MODEL = os.getenv("GROQ_WHISPER_MODEL", "whisper-large-v3-turbo")
@@ -675,6 +676,272 @@ Balas HANYA dengan JSON object persis seperti ini, tanpa teks lain:
     if not hooks:
         return jsonify({"error": str(last_err) if last_err else "Gagal generate hook, coba lagi!"}), 500
     return jsonify({"hooks": hooks})
+
+# =====================================================================
+# MODE LOKAL (Termux / PC sendiri) — potong langsung dari link.
+#
+# Di serverless (Vercel) fitur ini MATI by design: tidak ada ffmpeg/yt-dlp
+# dan IP cloud diblokir YouTube. Di Termux, server jalan di HP user dengan
+# IP rumahan: yt-dlp download video sumber, ffmpeg beneran yang memotong
+# dan menggambar caption (drawtext) — bukan mesin browser.
+# =====================================================================
+import shutil, subprocess, tempfile, threading, time, uuid
+
+_LOCAL_FFMPEG = shutil.which("ffmpeg")
+_LOCAL_YTDLP = shutil.which("yt-dlp")
+
+
+def _ffmpeg_has_drawtext():
+    if not _LOCAL_FFMPEG:
+        return False
+    try:
+        out = subprocess.run([_LOCAL_FFMPEG, "-hide_banner", "-filters"],
+                             capture_output=True, text=True, timeout=20).stdout
+        return " drawtext " in out
+    except Exception:
+        return False
+
+
+LOCAL_CUT = bool(_LOCAL_FFMPEG and _LOCAL_YTDLP and _ffmpeg_has_drawtext()
+                 and not os.getenv("VERCEL"))
+
+_FONT_DIRS = [
+    "/data/data/com.termux/files/usr/share/fonts/TTF",
+    "/data/data/com.termux/files/usr/share/fonts",
+    "/usr/share/fonts/truetype/dejavu",
+    "/usr/share/fonts/TTF",
+]
+
+
+def _find_font(bold=True, mono=False):
+    names = (["DejaVuSansMono-Bold.ttf", "DejaVuSansMono.ttf"] if mono else
+             ["DejaVuSans-Bold.ttf", "DejaVuSans.ttf"] if bold else
+             ["DejaVuSans.ttf"])
+    for d in _FONT_DIRS:
+        for n in names:
+            p = os.path.join(d, n)
+            if os.path.exists(p):
+                return p
+    return None
+
+
+# Pemetaan gaya caption (kunci sama dengan CAP_STYLE_CFG di frontend).
+# fs/border dihitung relatif terhadap tinggi output.
+SERVER_STYLE = {
+    "klasik":  {"fs": 0.040, "color": "0xffffff", "border_ratio": 0.16, "border_color": "0x000000", "box": 0, "upper": False, "center": False, "bold": True, "mono": False},
+    "kotak":   {"fs": 0.040, "color": "0xffffff", "border_ratio": 0, "border_color": "0x000000", "box": 1, "box_color": "black@0.72", "upper": False, "center": False, "bold": True, "mono": False},
+    "pop":     {"fs": 0.062, "color": "0xffe033", "border_ratio": 0.20, "border_color": "0x000000", "box": 0, "upper": True, "center": False, "bold": True, "mono": False},
+    "tengah":  {"fs": 0.068, "color": "0xffffff", "border_ratio": 0.15, "border_color": "0x000000", "box": 0, "upper": False, "center": True, "bold": True, "mono": False},
+    "minimal": {"fs": 0.030, "color": "0xffffff", "border_ratio": 0, "border_color": "0x000000", "box": 0, "upper": False, "center": False, "bold": False, "mono": False},
+    "neon":    {"fs": 0.058, "color": "0x4df3ff", "border_ratio": 0.10, "border_color": "0x032630", "box": 0, "upper": True, "center": False, "bold": True, "mono": False},
+    "api":     {"fs": 0.055, "color": "0xffa62b", "border_ratio": 0.18, "border_color": "0x000000", "box": 0, "upper": False, "center": False, "bold": True, "mono": False},
+    "impact":  {"fs": 0.066, "color": "0xff4040", "border_ratio": 0.24, "border_color": "0x000000", "box": 0, "upper": True, "center": False, "bold": True, "mono": False},
+    "invers":  {"fs": 0.040, "color": "0x0c0d10", "border_ratio": 0, "border_color": "0x000000", "box": 1, "box_color": "white@0.94", "upper": False, "center": False, "bold": True, "mono": False},
+    "mesin":   {"fs": 0.034, "color": "0xc8ffd9", "border_ratio": 0.10, "border_color": "0x04150a", "box": 0, "upper": True, "center": False, "bold": False, "mono": True},
+}
+
+_JOBS = {}
+_JOBS_LOCK = threading.Lock()
+_JOBS_DIR = os.path.join(tempfile.gettempdir(), "klipin_local_jobs")
+os.makedirs(_JOBS_DIR, exist_ok=True)
+
+
+def _build_cues_py(segments, start, end, upper):
+    """Port buildCues dari frontend: potong segmen jadi cue maks 6 kata."""
+    cues = []
+    in_range = [s for s in (segments or []) if isinstance(s, dict)
+                and start - 1 <= float(s.get("start", 0)) < end]
+    for i, s in enumerate(in_range):
+        s_start = float(s.get("start", 0))
+        nxt = float(in_range[i + 1].get("start", 0)) if i + 1 < len(in_range) else s_start + 4
+        cs = max(s_start, start) - start
+        ce = min(nxt, end) - start
+        text = re.sub(r"\s+", " ", str(s.get("text", ""))).strip()
+        if not text or ce <= cs:
+            continue
+        if upper:
+            text = text.upper()
+        words = text.split(" ")
+        chunks = [" ".join(words[w:w + 6]) for w in range(0, len(words), 6)]
+        acc = 0.0
+        for ch in chunks:
+            frac = len(ch.split(" ")) / len(words)
+            t0 = cs + (ce - cs) * acc
+            t1 = cs + (ce - cs) * (acc + frac)
+            acc += frac
+            if t1 > t0:
+                cues.append((round(t0, 2), round(t1, 2), ch))
+    return cues[:120]
+
+
+def _source_path(video_id):
+    return os.path.join(_JOBS_DIR, "_src_" + video_id + ".mp4")
+
+
+def _ensure_source(video_id, job):
+    path = _source_path(video_id)
+    if os.path.exists(path) and os.path.getsize(path) > 100000:
+        return path
+    job["phase"] = "Mengunduh video sumber dari YouTube…"
+    url = "https://www.youtube.com/watch?v=" + video_id
+    cmd = [_LOCAL_YTDLP, "-f", "bv*[height<=720]+ba/b[height<=720]/b",
+           "--merge-output-format", "mp4", "--no-playlist", "--no-warnings",
+           "-o", path, url]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+    if r.returncode != 0 or not os.path.exists(path):
+        tail = (r.stderr or r.stdout or "")[-300:]
+        raise RuntimeError("Download video sumber gagal. " + tail)
+    return path
+
+
+def _wrap_cue_text(text, cpl):
+    words = text.split(" ")
+    lines, cur = [], ""
+    for w in words:
+        t = (cur + " " + w).strip()
+        if len(t) > cpl and cur:
+            lines.append(cur)
+            cur = w
+        else:
+            cur = t
+    if cur:
+        lines.append(cur)
+    return "\n".join(lines[:4])
+
+
+def _cut_one(src, start, end, out_path, style_key, vertical, segments, workdir):
+    st = SERVER_STYLE.get(style_key) or SERVER_STYLE["klasik"]
+    out_h = 1920 if vertical else 720
+    out_w = 1080 if vertical else 1280
+    font = _find_font(bold=st["bold"], mono=st["mono"])
+    cues = _build_cues_py(segments, start, end, st["upper"]) if (segments and font) else []
+    if vertical:
+        graph = ("[0:v]split=2[a][b];"
+                 "[a]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,gblur=sigma=40[bg];"
+                 "[b]scale=1080:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2[base]")
+    else:
+        graph = "[0:v]scale=-2:'min(720,ih)'[base]"
+    prev = "base"
+    fs = max(18, int(out_h * st["fs"]))
+    bw = max(0, int(fs * st["border_ratio"]))
+    # drawtext tidak membungkus teks: perkirakan lebar per karakter lalu
+    # bungkus cue jadi maks 4 baris supaya tidak luber keluar frame.
+    # (DejaVu itu font lebar: faktornya lebih besar dari font sans biasa.)
+    if st["mono"]:
+        char_w = 0.62
+    elif st["upper"]:
+        char_w = 0.80
+    elif st["bold"]:
+        char_w = 0.72
+    else:
+        char_w = 0.66
+    cpl = max(6, int((out_w * 0.90) / (fs * char_w)))
+    for n, (t0, t1, text) in enumerate(cues):
+        tf = os.path.join(workdir, "cue_%d.txt" % n)
+        with open(tf, "w", encoding="utf-8") as f:
+            f.write(_wrap_cue_text(text, cpl))
+        y = "h*0.56-text_h/2" if st["center"] else "h-text_h-h*0.07"
+        dt = ("drawtext=fontfile='%s':textfile='cue_%d.txt':fontsize=%d:fontcolor=%s"
+              ":x=(w-text_w)/2:y=%s:enable='between(t,%.2f,%.2f)'"
+              % (font, n, fs, st["color"], y, t0, t1))
+        if bw:
+            dt += ":borderw=%d:bordercolor=%s" % (bw, st["border_color"])
+        if st.get("box"):
+            dt += ":box=1:boxcolor=%s:boxborderw=%d" % (st.get("box_color", "black@0.72"), max(8, fs // 2))
+        graph += ";[%s]%s[d%d]" % (prev, dt, n)
+        prev = "d%d" % n
+    graph += ";[%s]format=yuv420p[vout]" % prev
+    cmd = [_LOCAL_FFMPEG, "-y", "-ss", str(start), "-to", str(end), "-i", src,
+           "-filter_complex", graph, "-map", "[vout]", "-map", "0:a?",
+           "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+           "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", out_path]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=1800, cwd=workdir)
+    if r.returncode != 0 or not os.path.exists(out_path):
+        tail = (r.stderr or "")[-300:]
+        raise RuntimeError("ffmpeg gagal memotong. " + tail)
+    return out_path
+
+
+def _run_local_job(job_id, payload):
+    job = _JOBS[job_id]
+    try:
+        src = _ensure_source(payload["video_id"], job)
+        workdir = os.path.join(_JOBS_DIR, job_id)
+        os.makedirs(workdir, exist_ok=True)
+        files = []
+        for i, c in enumerate(payload["clips"]):
+            job["phase"] = "Memotong clip %d dari %d…" % (i + 1, len(payload["clips"]))
+            name = "klipin-%s-%02d.mp4" % (payload["video_id"], i + 1)
+            out = os.path.join(workdir, name)
+            _cut_one(src, c["start"], c["end"], out, payload["style"],
+                     payload["vertical"],
+                     payload["segments"] if payload["captions"] else [], workdir)
+            files.append({"name": name, "path": out})
+        job["files"] = files
+        job["phase"] = "Selesai"
+        job["status"] = "done"
+    except Exception as e:
+        job["status"] = "error"
+        job["error"] = str(e)[:400]
+        job["phase"] = "Gagal"
+
+
+@app.route("/api/local/jobs", methods=["POST"])
+def local_job_create():
+    if not LOCAL_CUT:
+        return jsonify({"error": "Mode potong langsung hanya aktif saat Klipin jalan lokal (Termux/PC) dengan ffmpeg + yt-dlp. Di Vercel fitur ini mati by design."}), 400
+    data = request.get_json(force=True, silent=True) or {}
+    video_id = str(data.get("video_id") or "")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id):
+        return jsonify({"error": "video_id tidak valid."}), 400
+    clips = []
+    for c in (data.get("clips") or [])[:6]:
+        try:
+            s = parse_ts(str(c.get("start", "")))
+            e = parse_ts(str(c.get("end", "")))
+        except Exception:
+            continue
+        if e > s >= 0 and e - s <= 3600:
+            clips.append({"start": s, "end": e})
+    if not clips:
+        return jsonify({"error": "Tidak ada clip yang valid."}), 400
+    segs = []
+    for s in (data.get("segments") or [])[:4000]:
+        if isinstance(s, dict) and "start" in s:
+            try:
+                segs.append({"start": float(s["start"]), "text": str(s.get("text", ""))})
+            except Exception:
+                pass
+    job_id = uuid.uuid4().hex[:12]
+    payload = {"video_id": video_id, "clips": clips,
+               "style": str(data.get("style") or "klasik"),
+               "vertical": bool(data.get("vertical", True)),
+               "captions": bool(data.get("captions", True)),
+               "segments": segs}
+    with _JOBS_LOCK:
+        _JOBS[job_id] = {"status": "working", "phase": "Menyiapkan…", "error": "", "files": []}
+    threading.Thread(target=_run_local_job, args=(job_id, payload), daemon=True).start()
+    return jsonify({"job_id": job_id})
+
+
+@app.route("/api/local/jobs/<job_id>")
+def local_job_status(job_id):
+    job = _JOBS.get(job_id)
+    if not job:
+        return jsonify({"error": "Job tidak ditemukan (server mungkin restart)."}), 404
+    return jsonify({"status": job["status"], "phase": job["phase"],
+                    "error": job["error"],
+                    "files": [f["name"] for f in job["files"]]})
+
+
+@app.route("/api/local/jobs/<job_id>/file/<int:idx>")
+def local_job_file(job_id, idx):
+    job = _JOBS.get(job_id)
+    if not job or idx >= len(job["files"]):
+        return jsonify({"error": "File tidak ditemukan."}), 404
+    f = job["files"][idx]
+    return send_file(f["path"], as_attachment=True, download_name=f["name"])
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5003)), debug=os.environ.get("DEBUG") == "1")
